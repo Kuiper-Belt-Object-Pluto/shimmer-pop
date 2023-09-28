@@ -1,0 +1,13 @@
+{
+	"Name": "Shimmer Pop",
+	"ID": "ShimmerPop",
+	"Author": "Best Dad",
+	"Description": "Adds toggles for autoclicking multiple different things, such as Gold Cookies and Reindeer! How nifty! Doesn't disable Steam achievements.",
+	"ModVersion": 3.0.1,
+	"GameVersion": 2.052,
+	"Date": "28/09/2023",
+	"Dependencies": ["CCSE"],
+	"Disabled": 0,
+	"AllowSteamAchievs": 1,
+	"Workshop": "2991686040"
+}
