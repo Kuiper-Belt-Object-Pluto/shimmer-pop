@@ -1,0 +1,570 @@
+
+
+/*
+ * CCSE Code from https://klattmose.github.io/CookieClicker/CCSE-POCs/
+ * All credit for the CCSE implementation methods and code goes to Matt Klose
+ *
+ * Mod programmed by Best Dad
+ * https://steamcommunity.com/id/alternativefactsenabler/
+ * https://steamcommunity.com/sharedfiles/filedetails/?id=2991686040
+ * Oh boy was making this a pain in the ass, holy hell, I hate javascript so much
+ *
+ * Development on Version 2 started 09/10/2023
+*/
+
+
+if(shimmerPop === undefined) var shimmerPop = {};
+if(typeof CCSE == 'undefined') Game.LoadMod('https://klattmose.github.io/CookieClicker/CCSE.js');
+shimmerPop.name = 'Shimmer Pop';
+shimmerPop.version = '2.1';
+shimmerPop.GameVersion = '2.052';
+
+const menuHeader = '<div class="listing" style="margin:24px 0px 6px;"><label style="border:none;font-size:14px;font-weight:bold;">';
+var verifiedConfig = 0;
+
+shimmerPop.launch = function() {
+
+	shimmerPop.defaultConfig = function() {
+		return {
+			bigCookie: 1,
+			bigCookieDelay: 100,
+			goldCookies: 1,
+			reindeer: 1,
+			wrathCookies: 0,
+			wrinklers: 0,
+			wrinklersShiny: 0,
+			fortunes: 1,
+			levelSanta: 1,
+			levelKrumblor: 0,
+			harvestSugarLumps: 0,
+			ripeSugarLumps: 0,
+			buyAllUpgrades: 1,
+			autoResearch: 0,
+			muteNonMinigames: 0,
+			expandMinigames: 0,
+
+			pantheon: {
+				forceSlotting: 0, //cheat, but we'll keep it here
+				slot0: null, // diamond
+				slot1: null, // ruby
+				slot2: null, // jade
+			},
+
+			/* Unused right now, might make cheats save */
+			cheats: {
+				infiniteMagic: 0,
+				spawningGoldCookies: 0,
+			}
+		}
+	}
+
+	shimmerPop.init = function() {
+		shimmerPop.restoreDefaultConfig();
+		Game.customOptionsMenu.push(function(){
+			CCSE.AppendCollapsibleOptionsMenu(shimmerPop.name + ' (v' + shimmerPop.version + ')', shimmerPop.getMenuString());
+		});
+		Game.customOptionsMenu.push(function(){
+			CCSE.AppendCollapsibleOptionsMenu(shimmerPop.name + ' Cheat Menu', shimmerPop.getCheatMenuString());
+		});
+
+		CCSE.AddStyles(`
+		.subOption {
+			padding:3px 16px 0px 64px;
+		}
+		.fancySelectBox {
+			color: #ccc;
+			font-family:'Merriweather', Georgia,serif;
+			font-variant: small-caps;
+			font-weight: bold;
+			font-size: 12px;
+			text-decoration: none;
+			display: inline-block;
+			background: #000 url(img/darkNoise.jpg);
+			background-image: url(img/shadedBordersSoft.png), url(img/darkNoise.jpg);
+			background-size: 100% 100%, auto;
+			background-color: #000;
+			margin: 2px 4px 2px 0px;
+			line-height: 100%;
+			border: 1px solid #e2dd48;
+			border-color: #ece2b6 #875526 #733726 #dfbc9a;
+			border-radius: 2px;
+			text-align-last: right;
+			/*width: 148px;*/
+			width: 250px;
+			vertical-align: middle;
+		}
+		.fancySelectBox > option {
+			direction: rtl; 
+		}`);
+		if(Game.prefs.popups) {
+			Game.Popup('Shimmer Pop Loaded');
+		} else {
+			Game.Notify('Shimmer Pop Loaded', 'Hands-free autoclicking bliss<br> v' + shimmerPop.version, [16,5]);
+		}
+	}
+
+	shimmerPop.buttonToggle = function(prefName, button, on, off, invert) {
+		if(shimmerPop.config[prefName]) {
+			l(button).innerHTML = off;
+			shimmerPop.config[prefName] = 0;
+			shimmerPop.loops.end(prefName);
+		} else {
+			l(button).innerHTML = on;
+			shimmerPop.config[prefName] = 1;
+			shimmerPop.loops.start(prefName);
+		}
+		l(button).className = `smallFancyButton prefButton option${ (shimmerPop.config[prefName]^invert) ? '' : ' off' }`;
+	}
+
+	shimmerPop.setInputConfig = function(id) {
+		var delay = Math.min(Math.max(l('bigCookieDelay').value.replace(/\D/g,''), 1), 65535);
+		shimmerPop.config[id] = delay;
+		l(id).value = delay;
+		var loop = id.replace('Delay', '');
+		if(loop && shimmerPop.config[loop]) {
+			shimmerPop.loops.start(loop);
+		}
+	}
+
+	shimmerPop.togglePantheon = function(event, slot) {
+		let god = event.target.value;
+		shimmerPop.config.pantheon[slot] = god;
+		Game.UpdateMenu();
+	}
+
+	shimmerPop.configSanity = function(str) {
+		var loadedConfig = JSON.parse(str);
+		var sanitizedConfig = shimmerPop.defaultConfig();
+		// I changed growSanta to levelSanta and went on a 5 hour debug session trying to figure out why my scripts were crashing :)
+		for(let [key, value] of Object.entries(loadedConfig)) { // javascript has like 15 different ways to do this same function btw, its so annoying
+			if(!sanitizedConfig.hasOwnProperty(key)) {
+				delete loadedConfig[key];
+			}
+		}
+		// Add newer config keys so we don't ever have undefined keys/values! Ran into this after fixing the above issue!
+		for(let [key, value] of Object.entries(sanitizedConfig)) {
+			if( (typeof value === "object" || typeof value === 'function') && (value !== null) ) {
+				for(let [nestedKey, nestedValue] of Object.entries(value)) {
+					loadedConfig[key][nestedKey] = nestedValue;
+					//alert(`Added ${nestedKey} with value ${nestedValue} to ${key} in config`);
+				}
+			}
+
+			if(!loadedConfig.hasOwnProperty(key)) {
+				loadedConfig[key] = value;
+			}
+		}
+		verifiedConfig = 1;
+		return loadedConfig;
+	}
+
+	shimmerPop.restoreDefaultConfig = function() {
+		shimmerPop.config = shimmerPop.defaultConfig();
+	}
+
+	shimmerPop.save = function() {
+		return JSON.stringify(shimmerPop.config);
+	}
+
+	shimmerPop.load = function(str) {
+		if(shimmerPop.isLoaded) return;
+		shimmerPop.config = shimmerPop.configSanity(str); // ran into an issue changing growSanta to levelSanta, guess need to iterate config options to prevent null cases?
+		shimmerPop.loops.init();
+		shimmerPop.isLoaded = 1;
+	}
+
+	/*
+	 *
+	 *  LOOPS FOR AUTO CLICKING
+	 *
+	 */
+
+	shimmerPop.loops = {
+		intervalIDs: {}, // gotta store the setInterval ids somewhere, ugh.
+
+		/*
+		 * Initialization functions
+		 */
+		init: function(x) {
+			const skip = ["intervalIDs", "init", "start", "end", "slotPantheon"];
+			for(let [key, value] of Object.entries(shimmerPop.loops)) {
+				if(!skip.includes(key) && shimmerPop.config.hasOwnProperty(key)) {
+					shimmerPop.loops.intervalIDs[key] = null;
+					shimmerPop.loops.start(key);
+				}
+			}
+			shimmerPop.loops["slotPantheon"](); // this should always just run
+		},
+		start: function(key) {
+			if(shimmerPop.config.hasOwnProperty(key) && shimmerPop.config[key] != 0) { // make sure the config is actually enabled
+				if(shimmerPop.loops.hasOwnProperty(key) && shimmerPop.loops.intervalIDs.hasOwnProperty(key)) { // i typo a lot so let's do some sanity checking
+					if(shimmerPop.loops.intervalIDs[key] != null) { // make doubly sure these dont get ran twice!
+						shimmerPop.loops.end(key);
+					}
+					shimmerPop.loops[key](key);
+				}
+			}
+		},
+		end: function(key) {
+			if(shimmerPop.loops.hasOwnProperty(key) && shimmerPop.loops.intervalIDs.hasOwnProperty(key)) { // same sanity checking
+				clearInterval(shimmerPop.loops.intervalIDs[key]);
+				shimmerPop.loops.intervalIDs[key] = null;
+			}
+		},
+
+
+
+		/*
+		 * Actual scripts
+		 */
+		bigCookie: function(key) {
+			shimmerPop.loops.intervalIDs[key] = setInterval(function() {
+				Game.ClickCookie();
+				Game.autoclickerDetected = 0; // dont wanna trigger Uncanny clicker
+			}, shimmerPop.config['bigCookieDelay']);
+		},
+
+		goldCookies: function(key) {
+			shimmerPop.loops.intervalIDs[key] = setInterval(function() {
+				if(Game.shimmers.length >= 1) {
+					Game.shimmers.filter((s) => s.wrath == 0).forEach(o => o.pop());
+				}
+			}, 100);
+		},
+
+		reindeer: function(key) {
+			shimmerPop.loops.intervalIDs[key] = setInterval(function() {
+				if(Game.shimmers.length >= 1) {
+					Game.shimmers.filter((s) => s.type == "reindeer").forEach(o => o.pop());
+				}
+			}, 100);
+		},
+
+		wrathCookies: function(key) {
+			shimmerPop.loops.intervalIDs[key] = setInterval(function() {
+				if(Game.shimmers.length >= 1) {
+					Game.shimmers.filter((s) => s.wrath != 0).forEach(o => o.pop());
+				}
+			}, 100);
+		},
+
+		wrinklers: function(key) {
+			shimmerPop.loops.intervalIDs[key] = setInterval(function() {
+				Game.wrinklers.filter((w) => w.phase>0 && w.hp>0 && (shimmerPop.config['wrinklersShiny'] && w.type==1 || 1)).forEach(o => o.hp = 0);
+				//Game.UpdateWrinklers(); // im unsure if calling this is required
+			}, 100);
+		},
+
+		fortunes: function(key) {
+			shimmerPop.loops.intervalIDs[key] = setInterval(function() {
+				if (Game.TickerEffect && Game.TickerEffect.type == 'fortune') {
+					Game.tickerL.click();
+				}
+			}, 1000);
+		},
+
+		levelSanta: function(key) {
+			shimmerPop.loops.intervalIDs[key] = setInterval(function() {
+				if(Game.Has('A festive hat') && Game.santaLevel < 14) { // You can upgrade Santa before unlocking him! How cool! Let's fix that.
+					Game.specialTab = "santa"; // the special menu is p special -- its really dumb lmao, it glitches if you dont set this var?? it can be literally anything btw, which is why the null check is stupid
+					Game.UpgradeSanta();
+					Game.ToggleSpecialMenu(0); // this should force it to close/remove itself but it doesnt if you dont set specialTab because the function checks if its !='', thats so dumb
+				}
+			}, 1000); // I think a second is fast enough to upgrade the specials
+		},
+
+		levelKrumblor: function(key) {
+			shimmerPop.loops.intervalIDs[key] = setInterval(function() {
+				// You may think doing the checks again is a waste of cycles, but it prevents the special menu from being removed if you want to manually open it :D
+				if (Game.dragonLevel<Game.dragonLevels.length-1 && Game.dragonLevels[Game.dragonLevel].cost()) {
+					Game.specialTab = "dragon";
+					Game.UpgradeDragon();
+					Game.ToggleSpecialMenu(0);
+				}
+				// Adapting the game's code to auto collect the dragon's items, but still playing by the game's rules
+				if(Game.dragonLevel>=4 && Game.Has('Pet the dragon')) {
+					Game.lastClickedSpecialPic = Date.now();
+					if(Game.dragonLevel>=8 && Math.random()<1/20) {
+						Math.seedrandom(Game.seed+'/dragonTime');
+						var drops = ['Dragon scale','Dragon claw','Dragon fang','Dragon teddy bear'];
+						drops = shuffle(drops);
+						var drop = drops[Math.floor((new Date().getMinutes()/60)*drops.length)];
+						if(!Game.Has(drop) && !Game.HasUnlocked(drop)) {
+							Game.Unlock(drop);
+							Game.Notify(drop,'<b>'+loc("Your dragon dropped something!")+'</b>',Game.Upgrades[drop].icon);
+						}
+						Math.seedrandom();
+					}
+				}
+			}, 1000);
+		},
+
+		harvestSugarLumps: function(key) {
+			shimmerPop.loops.intervalIDs[key] = setInterval(function() {
+				// Code basically copy/pasted from the game itself and modified
+				if(Game.canLumps()) { // dont want to do anything if you havent unlocked them, right?
+					var age = Date.now()-Game.lumpT;
+					if (age >= Game.lumpMatureAge) {
+						if(shimmerPop.ripeSugarLumps && (age>=Game.lumpRipeAge && age<Game.lumpOverripeAge)) { // ripe lumps only! maybe!
+							Game.clickLump(); // yeah im letting the game take care of that, just need to determine when to call the func
+						} else {
+							Game.clickLump(); // so this should harvest the mature lumps, resulting in a 0/1 gain of sugar lumps
+						}
+					}
+				}
+			}, 10000); // 10 seconds is fine yeah? could probably even be an entire minute tbh
+		},
+
+		buyAllUpgrades: function(key) {
+			shimmerPop.loops.intervalIDs[key] = setInterval(function() {
+				for(var i in Game.UpgradesInStore) {
+					var me = Game.UpgradesInStore[i];
+					if(!me.isVaulted() && me.pool!='toggle' && me.pool!='tech' && me.name != "Chocolate egg") {
+						me.buy(1);
+					}
+				}
+			}, 1000);
+		},
+
+		autoResearch: function(key) {
+		},
+
+		muteNonMinigames: function(key) {
+			shimmerPop.loops.intervalIDs[key] = setInterval(function() {
+				var muted = ["Grandma","Mine","Factory","Shipment","Alchemy lab","Portal","Time machine","Antimatter condenser","Prism","Chancemaker","Fractal engine","Javascript console","Idleverse","Cortex baker","You"];
+				for(var i in Game.Objects) {
+					var building = Game.Objects[i];
+					if(muted.includes(building.name)) {
+						if(building.amount>0) {
+							building.mute(1);
+						}
+					} else {						
+						if(shimmerPop.config['expandMinigames'] && building.amount>0 && building.level >= 1 && !building.onMinigame) {
+							building.switchMinigame(1);
+						}
+					}
+				}
+			}, 5000); // isnt super important that this goes quickly, 5s sounds fine
+		},
+
+		slotPantheon: function() {
+			var l = setInterval(function() {
+				var templeMinigame = Game.Objects['Temple'].minigame;
+				if(templeMinigame != undefined && Game.Objects['Temple'].minigameLoaded) {
+					alert(shimmerPop.config.pantheon.slot1);
+					alert(shimmerPop.config.pantheon.forceSlotting);
+					if(shimmerPop.config.pantheon["forceSlotting"]) {
+						templeMinigame.swaps = 3;
+						templeMinigame.swapT = Date.now();
+						alert("Resetting slots");
+					}
+					for(var i=0; i<=2; i++) {
+						if(templeMinigame.slot[i] == -1) {
+							templeMinigame.dragGod(templeMinigame.godsById[shimmerPop.config.pantheon["slot" + i]]);
+							templeMinigame.hoverSlot(i);
+							templeMinigame.dropGod();
+							templeMinigame.hoverSlot(-1);
+						}
+					}
+				}
+			}, 5000); // isnt super important that this goes quickly, 5s sounds fine
+		},
+	}
+
+	/*
+	 *
+	 *  CONFIG MENU SETUP
+	 *
+	 */
+
+	shimmerPop.getMenuString = function() {
+		var str = menuHeader + 'Automation</label></div>';
+
+		// Autoclicking
+		str += '<div class="listing">' + CCSE.MenuHelper.ToggleButton(shimmerPop.config, "bigCookie", "OPTION_BIG_COOKIE", "Clicking the Big Cookie", "Ignoring the Big Cookie", 'shimmerPop.buttonToggle') + '<label>Automatically click the Big Cookie at the defined rate below. I recommend turning Numbers off in the options.</label></div>';
+		
+		var bigCookieDelayInput = CCSE.MenuHelper.InputBox('bigCookieDelay', 100, shimmerPop.config['bigCookieDelay'], 'shimmerPop.setInputConfig(this.id)');
+		bigCookieDelayInput = bigCookieDelayInput.replace('px;', 'px;background-color:#121212;color:#898989;text-align:right;');
+		str += '<div class="listing subOption">' + bigCookieDelayInput + '<label>Set the delay between each auto click on the big cookie, from 1ms to 65535ms</label></div>';
+
+		str += '<div class="listing">' + CCSE.MenuHelper.ToggleButton(shimmerPop.config, "goldCookies", "OPTION_GOLD_COOKIES", "Popping Golden Cookies", "Ignoring Golden Cookies", 'shimmerPop.buttonToggle') +
+			'<label>Automatically click all Golden Cookies</label></div>';
+
+		str += '<div class="listing">' + CCSE.MenuHelper.ToggleButton(shimmerPop.config, 'wrathCookies', 'OPTION_WRATH_COOKIES', "Popping Wrath Cookies", "Ignoring Wrath Cookies", 'shimmerPop.buttonToggle') +
+			'<label>Automatically click all Wrath Cookies</label></div>';
+
+		str += '<div class="listing">' + CCSE.MenuHelper.ToggleButton(shimmerPop.config, 'reindeer', 'OPTION_REINDEER', "Popping Reindeers", "Ignoring Reindeers", 'shimmerPop.buttonToggle') +
+			'<label>Automatically click all Reindeer</label></div>';
+
+		str += '<div class="listing">' + CCSE.MenuHelper.ToggleButton(shimmerPop.config, 'wrinklers', 'OPTION_WRINKLERS', "Popping Wrinklers", "Ignoring Wrinklers", 'shimmerPop.buttonToggle') +
+			'<label>Automatically click pop Wrinklers</label></div>';
+		str += '<div class="listing subOption">' + CCSE.MenuHelper.ToggleButton(shimmerPop.config, 'wrinklersShiny', 'OPTION_SHINY_WRINKLERS', "Popping Shinies", "Ignoring Shinies", 'shimmerPop.buttonToggle') + 
+			'<label>Toggles popping shiny wrinklers automatically (popping one is an achievement)</label></div>';
+
+		str += '<div class="listing">' + CCSE.MenuHelper.ToggleButton(shimmerPop.config, 'fortunes', 'OPTION_FORTUNES', "Popping Fortunes", "Ignoring Fortunes", 'shimmerPop.buttonToggle') +
+			'<label>Automatically click all Fortune Cookies (the News feed)</label></div>';
+
+		str += '<div class="listing">' + CCSE.MenuHelper.ToggleButton(shimmerPop.config, 'buyAllUpgrades', 'OPTION_UPGRADES', "Buying all Upgrades", "Ignoring Upgrades", 'shimmerPop.buttonToggle') +
+			'<label>Automatically buy every available upgrade. Ignores research.</label></div>';
+
+		str += '<div class="listing">' + CCSE.MenuHelper.ToggleButton(shimmerPop.config, 'autoResearch', 'OPTION_RESEARCH', "Starting Research", "Ignoring Research", 'shimmerPop.buttonToggle') +
+			'<label>Automatically start any available research.</label></div>';
+
+		// Santa & Krumblor
+		str += menuHeader + 'Specials (Santa/Krumblor)</label></div>';
+		str += '<div class="listing">' + CCSE.MenuHelper.ToggleButton(shimmerPop.config, 'levelSanta', 'OPTION_SANTA', "Leveling Santa", "Ignoring Santa", 'shimmerPop.buttonToggle') +
+			'<label>Automatically level Santa to the highest level your current cookies accounts for. (You unlock Santa during Christmas once you purchase the "A Festive Hat" upgrade)</label></div>';
+		str += '<div class="listing">' + CCSE.MenuHelper.ToggleButton(shimmerPop.config, 'levelKrumblor', 'OPTION_KRUMBLOR', "Leveling Krumblor", "Ignoring Krumblor", 'shimmerPop.buttonToggle') +
+			'<label>Automatically level Krumblor to the highest level according to your available buildings. (You unlock Krumblor via the Heavenly Chip upgrade "How to bake your dragon"). Automatically shows Krumblor affection to receive his drops.</label></div>';
+
+		// pantheon
+		str += menuHeader + 'Pantheon Setup</label></div>';
+		str += '<div class="listing" style="margin:-12px 0px 12px 24px;"><label><br/>Pantheon slotting has no special trigger on building purchase or selling, it\'s a simple continual loop every 5s that will assign your selected Gods, assuming the given slot is free.<br/><br/>It will not unslot any currently active God for any reason.<br/><br/>This is just meant as an automated means to assign your preferred Gods after an ascension.</label></div>';
+		var temple = Game.Objects['Temple'].minigame;
+		if(temple != undefined && Game.Objects['Temple'].minigameLoaded) {
+			for(var i=0; i<=2; i++) {
+				var s = `<div class="listing"><select id="shimmerPopPantheonSlot${ i }" class="fancySelectBox" onchange="shimmerPop.togglePantheon(event, 'slot${ i }')"><option value="null"${ shimmerPop.config.pantheon["slot" + i] == null ? " selected" : "" }>Unslotted</option>`;
+				for(var g = 0; g<temple.godsById.length; g++) {
+					var god = temple.godsById[g];
+					var disabled = '';
+					if(shimmerPop.config.pantheon["slot0"] == god.id || shimmerPop.config.pantheon["slot1"] == god.id || shimmerPop.config.pantheon["slot2"] == god.id) {
+						disabled = " disabled";
+					}
+					s += `<option value="${ god.id }"${ disabled }${ god.id == shimmerPop.config.pantheon['slot' + i] ? " selected" : "" }>${ god.name }</option>`; // 
+				}
+				s += `</select><label>${ i == 0 ? "Diamond Slot" : i == 1 ? "Ruby Slot" : "Jade Slot" }</label></div>`;
+				str += s;
+			}
+			str += '<div class="listing">' + CCSE.MenuHelper.ToggleButton(shimmerPop.config.pantheon, 'forceSlotting', 'PANTHEON_FORCE_SLOT', 'Forcing Slots', 'Abiding by the Rules', 'shimmerPop.buttonToggle') + '<label>This is a cheat, kind of, as it forcefully bypasses the Worship swap limit to force your Gods into place.</label></div>';
+		} else {
+			str += "<label>Pantheon settings will be available once the Temple is at least level 1.</label></div>";
+		}
+
+		// Misc?
+		str += menuHeader + 'Misc Settings</label></div>';
+		str += '<div class="listing">' + CCSE.MenuHelper.ToggleButton(shimmerPop.config, 'muteNonMinigames', 'OPTION_AUTO_MUTE', "Muting Buildings", "Not Auto-Muting", 'shimmerPop.buttonToggle') + '<label>Automatically mute every building that doesn\'t have a minigame (everything except Farm, Bank, Temple, Wizard Tower.) May have a small delay before activation.</label></div>';
+		str += '<div class="listing subOption">' + CCSE.MenuHelper.ToggleButton(shimmerPop.config, 'expandMinigames', 'OPTION_EXPAND_MINIGAMES', "Expanding Minigames", "Ignoring Minigames", 'shimmerPop.buttonToggle') + '<label>Auto expands a building\'s minigame, if available</label></div>';
+
+
+		// Sugar Lumps
+		str += menuHeader + "The Sugar Lump toggles are experimental, let me know in the mod\'s discussion page if they work or not!</label></div>";
+		str += '<div class="listing">' + CCSE.MenuHelper.ToggleButton(shimmerPop.config, 'harvestSugarLumps', 'OPTION_SUGAR_LUMPS', "Harvesting Sugar Lumps", "Ignoring Sugar Lumps", 'shimmerPop.buttonToggle') +
+			'<label>Automatically harvest Sugar Lumps (unlocked by baking at least 1bn cookies) when they are mature.</label></div>';
+		str += '<div class="listing subOption">' + CCSE.MenuHelper.ToggleButton(shimmerPop.config, 'ripeSugarLumps', 'OPTION_OVERRIPE_SUGAR_LUMPS', "Ripe Only", "Harvesting Mature", 'shimmerPop.buttonToggle') + 
+			'<label>Harvesting Sugar Lumps at their maturity gives either 0 or 1 Sugar Lump, ripe ones always give 1 -- you can force harvesting only at the ripe stage if you desire</label></div>';
+
+		return str;
+	}
+
+	shimmerPop.cheats = {
+		toggleButton: function(prefName, button, on, off, invert) {
+			var id = prefName + 'ID';
+			l(button).innerHTML = shimmerPop.cheats[id] ? off : on;
+			l(button).className = `smallFancyButton prefButton option${ (shimmerPop.cheats[id]^invert) ? 'off' : ' on' }`;
+			shimmerPop.cheats[prefName]();
+		},
+
+		spawnGoldCookie: function() {
+			new Game.shimmer('golden',{noWrath:true});
+		},
+		goldCookieLoopID: null,
+		goldCookieLoop: function() {
+			if(shimmerPop.cheats['goldCookieLoopID'] != null) {
+				clearInterval(shimmerPop.cheats['goldCookieLoopID']);
+				shimmerPop.cheats['goldCookieLoopID'] = null;
+				l('cheatsSpawnGoldCookies').innerHTML = "Disabled";
+			} else {
+				shimmerPop.cheats['goldCookieLoopID'] = setInterval(function() {
+					shimmerPop.cheats.spawnGoldCookie();
+					l('cheatsSpawnGoldCookies').innerHTML = "Enabled";
+				}, 333);
+			}
+		},
+
+		infiniteMagicID: null,
+		infiniteMagic: function() {
+			if(shimmerPop.cheats['infiniteMagicID'] != null) {
+				clearInterval(shimmerPop.cheats['infiniteMagicID']);
+				shimmerPop.cheats['infiniteMagicID'] = null;
+				l('infiniteMagicLabel').innerHTML = "Disabled";
+			} else {
+				shimmerPop.cheats['infiniteMagicID'] = setInterval(function() {
+					var g = Game.ObjectsById[7].minigame;
+					if(g) {
+						g.magic = g.magicM;
+					}
+					l('infiniteMagicLabel').innerHTML = "Enabled";
+				}, 100);
+			}
+		},
+
+		spawnShinyWrinkler: function() {
+			var wrinkler = Game.SpawnWrinkler(null);
+			wrinkler.type = 1;
+		},
+
+		returnEffectDurMod: function() {
+			var effectDurMod=1;
+			if(Game.Has('Get lucky')) effectDurMod*=2;
+			if(Game.Has('Lasting fortune')) effectDurMod*=1.1;
+			if(Game.Has('Lucky digit')) effectDurMod*=1.01;
+			if(Game.Has('Lucky number')) effectDurMod*=1.01;
+			if(Game.Has('Green yeast digestives')) effectDurMod*=1.01;
+			if(Game.Has('Lucky payout')) effectDurMod*=1.01;
+			effectDurMod*=1+Game.auraMult('Epoch Manipulator')*0.05;
+			effectDurMod*=Game.eff('goldenCookieEffDur');
+			return effectDurMod;
+		},
+
+		triggerDragonFlight: function() {
+			Game.gainBuff('dragonflight',Math.ceil(10*shimmerPop.cheats.returnEffectDurMod()),1111);
+		},
+		triggerClickFrenzy: function() {
+			Game.gainBuff('frenzy',Math.ceil(77*shimmerPop.cheats.returnEffectDurMod()),7);
+		},
+		triggerClot: function() {
+			Game.gainBuff('clot',Math.ceil(66*shimmerPop.cheats.returnEffectDurMod()),0.5);
+		},
+		triggerClotGrimoire: function() {
+			var buff=Game.gainBuff('clot',60*15,0.5);
+			var val=Math.min(Game.cookies*0.15,Game.cookiesPs*60*15)+13;
+			val=Math.min(Game.cookies,val);
+			Game.Spend(val);
+			Game.Notify(buff.name,buff.desc,buff.icon,6);
+			Game.Popup('<div style="font-size:80%;">'+loc("Backfire!")+'<br>'+loc("Summoning failed!")+' '+loc("Lost %1!",loc("%1 cookie",LBeautify(val)))+'</div>',Game.mouseX,Game.mouseY);
+		},
+	}
+
+	shimmerPop.getCheatMenuString = function() {
+		var str = menuHeader + 'Actual Cheat Functions. Use as desired. May invoke the cheater achievements. These aren\'t saved, and the label text may flick states due to the game\'s menu refreshing loop.</label></div>';
+		str += '<div class="listing">' + CCSE.MenuHelper.ActionButton("shimmerPop.cheats.spawnGoldCookie();", 'Spawn a Gold Cookie') + '</div>';
+		str += '<div class="listing">' + '<a class="smallFancyButton option"' +
+			`${ Game.clickStr }="shimmerPop.cheats.goldCookieLoop(); PlaySound('snd/tick.mp3');">Spawn Gold Cookies</a>` + '<label id="cheatsSpawnGoldCookies">Disabled</label></div>';
+		str += '<div class="listing">' + '<a class="smallFancyButton option"' +
+			`${ Game.clickStr }="shimmerPop.cheats.infiniteMagic(); PlaySound('snd/tick.mp3');">Infinite Magic</a>` + '<label id="infiniteMagicLabel">Disabled</label></div>';
+		str += '<div class="listing">' + CCSE.MenuHelper.ActionButton("shimmerPop.cheats.spawnShinyWrinkler();", 'Spawn a Shiny Wrinkler') + '</div>';
+		str += '<div class="listing">' + CCSE.MenuHelper.ActionButton("shimmerPop.cheats.triggerDragonFlight();", 'Trigger a Dragon Flight') + '</div>';
+		str += '<div class="listing">' + CCSE.MenuHelper.ActionButton("shimmerPop.cheats.triggerClickFrenzy();", 'Trigger a Click Frenzy') + '</div>';
+		str += '<div class="listing">' + CCSE.MenuHelper.ActionButton("shimmerPop.cheats.triggerClot();", 'Trigger Clot') + '</div>';
+		str += '<div class="listing">' + CCSE.MenuHelper.ActionButton("shimmerPop.cheats.triggerClotGrimoire();", 'Trigger Clot Grimoire') + '</div>';
+
+		//str += '<div class="listing">' + CCSE.MenuHelper.ToggleButton(shimmerPop.cheats, 'goldCookieLoop', 'cheatsSpawnGoldCookies', 'Spawning Gold Cookies', 'Idle', "shimmerPop.cheats.toggleButton") + '</div>';
+		return str
+	}
+
+	if(CCSE.ConfirmGameVersion(shimmerPop.name, shimmerPop.version, shimmerPop.GameVersion)) {
+		Game.registerMod(shimmerPop.name, shimmerPop);
+	}
+}
+// Copy/paste CCSE example code goes brr
+if(!shimmerPop.isLoaded){
+	if(CCSE && CCSE.isLoaded){
+		shimmerPop.launch();
+	}
+	else{
+		if(!CCSE) var CCSE = {};
+		if(!CCSE.postLoadHooks) CCSE.postLoadHooks = [];
+		CCSE.postLoadHooks.push(shimmerPop.launch);
+	}
+}
+
